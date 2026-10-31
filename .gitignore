@@ -1,0 +1,19 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build files
+build/
+dist/
+*.spec
+
+# IDE / Editor settings
+.vscode/
+.idea/
+*.swp
+*.syo
+
+# OS generated files
+.DS_Store
+Thumbs.db

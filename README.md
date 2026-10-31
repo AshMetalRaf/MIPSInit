@@ -11,6 +11,8 @@ A standalone tool that hooks into the PCSX2 PINE debugger protocol which analyze
 * **Memory Address Mapping:** Tracks down dynamic base address, stack boundary and other memory blocks.
 ---
 
+![MIPSInit](assets/gui.png)
+
 ## How It Works
 
 `MIPSInit` automates what used to be a tedious manual process which involves digging through static ELF headers "bytes @0x18" and manually inspect the debugger disassembly with the load address (e.g., `0x00100008`), to find the correct heap initialization block, the tool queries live memory via the PINE protocol to find these patterns instantly:

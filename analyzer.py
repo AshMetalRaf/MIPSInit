@@ -39,25 +39,24 @@ def perform_scan(log_callback):
             s.settimeout(3.0)
             s.connect((HOST, PORT))
             log_callback("[+] Connected to PCSX2 PINE server")
-
+ 
             curr = 0x00100000
-            end_addr = 0x00200000
+            end_addr = 0x00300000
             
             block_start = curr
-            block_num = 0  
+            block1_curr = None
+            block2_curr = None
             
-            block1_a0, block1_a1, block1_a3, block1_curr = None, None, None, None
+            block1_a0, block1_a1, block1_a3 = None, None, None
             block2_a0 = None
 
-            while curr <= end_addr and block_num < 2:
+            while curr <= end_addr:
                 val = read_instruction(s, curr)
                 if val is not None:
                     opcode = (val >> 26) & 0x3F
                     funct = val & 0x3F
 
                     if opcode == 0 and funct == 0x0C:
-                        block_num += 1
-                        
                         detected_syscall_code = None
                         prev_val = read_instruction(s, curr - 4)
                         if prev_val is not None:
@@ -66,44 +65,60 @@ def perform_scan(log_callback):
                             if p_op == 0x09:
                                 detected_syscall_code = p_imm
 
-                        if detected_syscall_code is None:
-                            detected_syscall_code = 0x3C if block_num == 1 else 0x3D
+                        if detected_syscall_code == 0x3C and block1_curr is None:
+                            sc1_val = 0x3C
+                            block1_curr = curr
+                            log_callback(f"[+] Syscall 0x3C (#1) located at address: 0x{curr:08X}")
+                            
+                            regs = {i: 0 for i in range(32)}
+                            for addr in range(block_start, curr + 4, 4):
+                                inst_val = read_instruction(s, addr)
+                                if inst_val is not None:
+                                    op = (inst_val >> 26) & 0x3F
+                                    rs = (inst_val >> 21) & 0x1F
+                                    rt = (inst_val >> 16) & 0x1F
+                                    rd = (inst_val >> 11) & 0x1F
+                                    imm = inst_val & 0xFFFF
+                                    f = inst_val & 0x3F
 
-                        if block_num == 1:
-                            sc1_val = detected_syscall_code
-                            log_callback(f"[+] Syscall 0x{sc1_val:02X} #{block_num} located at address: 0x{curr:08X}")
-                        elif block_num == 2:
-                            sc2_val = detected_syscall_code
-                            log_callback(f"[+] Syscall 0x{sc2_val:02X} #{block_num} located at address: 0x{curr:08X}")
+                                    if op == 0x0F:
+                                        regs[rt] = (imm << 16) & 0xFFFFFFFF
+                                    elif op == 0x09:
+                                        regs[rt] = (regs[rs] + sign_extend(imm)) & 0xFFFFFFFF
+                                    elif op == 0x00 and f == 0x25:
+                                        regs[rd] = (regs[rs] | regs[rt]) & 0xFFFFFFFF
 
-                        regs = {i: 0 for i in range(32)}
-
-                        for addr in range(block_start, curr + 4, 4):
-                            inst_val = read_instruction(s, addr)
-                            if inst_val is not None:
-                                op = (inst_val >> 26) & 0x3F
-                                rs = (inst_val >> 21) & 0x1F
-                                rt = (inst_val >> 16) & 0x1F
-                                rd = (inst_val >> 11) & 0x1F
-                                imm = inst_val & 0xFFFF
-                                f = inst_val & 0x3F
-
-                                if op == 0x0F:
-                                    regs[rt] = (imm << 16) & 0xFFFFFFFF
-                                elif op == 0x09:
-                                    regs[rt] = (regs[rs] + sign_extend(imm)) & 0xFFFFFFFF
-                                elif op == 0x00 and f == 0x25:
-                                    regs[rd] = (regs[rs] | regs[rt]) & 0xFFFFFFFF
-
-                        if block_num == 1:
                             block1_a0 = regs[4]
                             block1_a1 = regs[5]
                             block1_a3 = regs[7]
-                            block1_curr = curr
-                        elif block_num == 2:
-                            block2_a0 = regs[4]
+                            block_start = curr + 4
 
-                        block_start = curr + 4
+                        elif detected_syscall_code == 0x3D and block2_curr is None:
+                            sc2_val = 0x3D
+                            block2_curr = curr
+                            log_callback(f"[+] Syscall 0x3D (#2) located at address: 0x{curr:08X}")
+                            
+                            regs = {i: 0 for i in range(32)}
+                            for addr in range(block_start, curr + 4, 4):
+                                inst_val = read_instruction(s, addr)
+                                if inst_val is not None:
+                                    op = (inst_val >> 26) & 0x3F
+                                    rs = (inst_val >> 21) & 0x1F
+                                    rt = (inst_val >> 16) & 0x1F
+                                    rd = (inst_val >> 11) & 0x1F
+                                    imm = inst_val & 0xFFFF
+                                    f = inst_val & 0x3F
+
+                                    if op == 0x0F:
+                                        regs[rt] = (imm << 16) & 0xFFFFFFFF
+                                    elif op == 0x09:
+                                        regs[rt] = (regs[rs] + sign_extend(imm)) & 0xFFFFFFFF
+                                    elif op == 0x00 and f == 0x25:
+                                        regs[rd] = (regs[rs] | regs[rt]) & 0xFFFFFFFF
+
+                            block2_a0 = regs[4]
+                            break
+
                 curr += 4
 
             sync_found = False
@@ -156,7 +171,7 @@ def perform_scan(log_callback):
                 found_a1 = block1_a1
                 found_entry = block1_a3
             else:
-                log_callback("[*] SYNC not found nearby, using standard syscall mapping...")
+                log_callback("[*] SYNC skipped. running targeted syscall scan...")
                 found_a0 = block1_a0
                 found_a1 = block1_a1
                 found_entry = block1_a3
